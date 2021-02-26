@@ -48,15 +48,32 @@ export interface DirectiveHandlerData {
   isStructural: boolean;
 }
 
+export interface SemanticTypeParameter {
+  hasGenericTypeBound: boolean;
+}
+
+export function extractSemanticTypeParameters(node: ClassDeclaration): SemanticTypeParameter[]|
+    null {
+  if (!ts.isClassDeclaration(node) || node.typeParameters === undefined) {
+    return null;
+  }
+
+  return node.typeParameters.map(
+      typeParam => ({hasGenericTypeBound: typeParam.constraint !== undefined}));
+}
+
 /**
  * Represents an Angular directive. Components are represented by `ComponentSymbol`, which inherits
  * from this symbol.
  */
 export class DirectiveSymbol extends SemanticSymbol {
+  baseClass: SemanticSymbol|null = null;
+
   constructor(
       decl: ClassDeclaration, public readonly selector: string|null,
       public readonly inputs: string[], public readonly outputs: string[],
-      public readonly exportAs: string[]|null) {
+      public readonly exportAs: string[]|null,
+      public readonly typeParameters: SemanticTypeParameter[]|null) {
     super(decl);
   }
 
@@ -78,6 +95,39 @@ export class DirectiveSymbol extends SemanticSymbol {
         !isArrayEqual(this.outputs, previousSymbol.outputs) ||
         !isArrayEqual(this.exportAs, previousSymbol.exportAs);
   }
+
+  isTypeCheckApiAffected(previousSymbol: SemanticSymbol): boolean {
+    if (this.isPublicApiAffected(previousSymbol)) {
+      return true;
+    }
+
+    if (!(previousSymbol instanceof DirectiveSymbol)) {
+      return true;
+    }
+
+    if (isTypeParameterAffected(this.typeParameters, previousSymbol.typeParameters)) {
+      return true;
+    }
+
+    return false;
+  }
+}
+
+function isTypeParameterAffected(
+    current: SemanticTypeParameter[]|null, previous: SemanticTypeParameter[]|null): boolean {
+  if (!isArrayEqual(current, previous, isTypeParameterEqual)) {
+    return true;
+  }
+
+  if (current !== null && current.some(typeParam => typeParam.hasGenericTypeBound)) {
+    return true;
+  }
+
+  return false;
+}
+
+function isTypeParameterEqual(a: SemanticTypeParameter, b: SemanticTypeParameter): boolean {
+  return a.hasGenericTypeBound === b.hasGenericTypeBound;
 }
 
 export class DirectiveDecoratorHandler implements
@@ -151,9 +201,11 @@ export class DirectiveDecoratorHandler implements
   }
 
   symbol(node: ClassDeclaration, analysis: Readonly<DirectiveHandlerData>): DirectiveSymbol {
+    const typeParameters = extractSemanticTypeParameters(node);
+
     return new DirectiveSymbol(
         node, analysis.meta.selector, analysis.inputs.propertyNames, analysis.outputs.propertyNames,
-        analysis.meta.exportAs);
+        analysis.meta.exportAs, typeParameters);
   }
 
   register(node: ClassDeclaration, analysis: Readonly<DirectiveHandlerData>): void {

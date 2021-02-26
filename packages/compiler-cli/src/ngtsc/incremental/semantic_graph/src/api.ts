@@ -70,6 +70,11 @@ export abstract class SemanticSymbol {
    * @param publicApiAffected The set of symbols which of which the public API has changed.
    */
   isEmitAffected?(previousSymbol: SemanticSymbol, publicApiAffected: Set<SemanticSymbol>): boolean;
+
+  abstract isTypeCheckApiAffected(previousSymbol: SemanticSymbol): boolean;
+
+  isTypeCheckBlockAffected?
+      (previousSymbol: SemanticSymbol, typeCheckApiAffected: Set<SemanticSymbol>): boolean;
 }
 
 /**

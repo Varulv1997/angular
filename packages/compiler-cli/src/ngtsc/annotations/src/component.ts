@@ -27,7 +27,7 @@ import {SubsetOfKeys} from '../../util/src/typescript';
 
 import {ResourceLoader} from './api';
 import {createValueHasWrongTypeError, getDirectiveDiagnostics, getProviderDiagnostics} from './diagnostics';
-import {DirectiveSymbol, extractDirectiveMetadata, parseFieldArrayValue} from './directive';
+import {DirectiveSymbol, extractDirectiveMetadata, extractSemanticTypeParameters, parseFieldArrayValue} from './directive';
 import {compileNgFactoryDefField} from './factory';
 import {generateSetClassMetadataCall} from './metadata';
 import {NgModuleSymbol} from './ng_module';
@@ -129,7 +129,7 @@ export class ComponentSymbol extends DirectiveSymbol {
     // Create an equality function that considers symbols equal if they represent the same
     // declaration, but only if the symbol in the current compilation does not have its public API
     // affected.
-    const isSymbolAffected = (current: SemanticReference, previous: SemanticReference) =>
+    const isSymbolUnaffected = (current: SemanticReference, previous: SemanticReference) =>
         isReferenceEqual(current, previous) && !publicApiAffected.has(current.symbol);
 
     // The emit of a component is affected if either of the following is true:
@@ -140,8 +140,31 @@ export class ComponentSymbol extends DirectiveSymbol {
     //  3. The list of used pipes has changed, or any of those pipes have had their public API
     //     changed.
     return this.isRemotelyScoped !== previousSymbol.isRemotelyScoped ||
-        !isArrayEqual(this.usedDirectives, previousSymbol.usedDirectives, isSymbolAffected) ||
-        !isArrayEqual(this.usedPipes, previousSymbol.usedPipes, isSymbolAffected);
+        !isArrayEqual(this.usedDirectives, previousSymbol.usedDirectives, isSymbolUnaffected) ||
+        !isArrayEqual(this.usedPipes, previousSymbol.usedPipes, isSymbolUnaffected);
+  }
+
+  isTypeCheckBlockAffected(
+      previousSymbol: SemanticSymbol, typeCheckApiAffected: Set<SemanticSymbol>): boolean {
+    if (!(previousSymbol instanceof ComponentSymbol)) {
+      return true;
+    }
+
+    // Create an equality function that considers symbols equal if they represent the same
+    // declaration, but only if the symbol in the current compilation does not have its public API
+    // affected.
+    const isSymbolUnaffected = (current: SemanticReference, previous: SemanticReference) =>
+        isReferenceEqual(current, previous) && !typeCheckApiAffected.has(current.symbol);
+
+    // The emit of a component is affected if either of the following is true:
+    //  1. The component used to be remotely scoped but no longer is, or vice versa.
+    //  2. The list of used directives has changed or any of those directives have had their public
+    //     API changed. If the used directives have been reordered but not otherwise affected then
+    //     the component must still be re-emitted, as this may affect directive instantiation order.
+    //  3. The list of used pipes has changed, or any of those pipes have had their public API
+    //     changed.
+    return !isArrayEqual(this.usedDirectives, previousSymbol.usedDirectives, isSymbolUnaffected) ||
+        !isArrayEqual(this.usedPipes, previousSymbol.usedPipes, isSymbolUnaffected);
   }
 }
 
@@ -433,9 +456,11 @@ export class ComponentDecoratorHandler implements
   }
 
   symbol(node: ClassDeclaration, analysis: Readonly<ComponentAnalysisData>): ComponentSymbol {
+    const typeParameters = extractSemanticTypeParameters(node);
+
     return new ComponentSymbol(
         node, analysis.meta.selector, analysis.inputs.propertyNames, analysis.outputs.propertyNames,
-        analysis.meta.exportAs);
+        analysis.meta.exportAs, typeParameters);
   }
 
   register(node: ClassDeclaration, analysis: ComponentAnalysisData): void {
